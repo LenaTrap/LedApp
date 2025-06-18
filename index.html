@@ -1,0 +1,212 @@
+
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RGB Lamp Controller Bluetooth</title>
+  <style>
+    /* [CSS – bez zmian] */
+    body { background: #111; color: white; font-family: Arial, sans-serif; margin:0; padding:0;}
+    header { padding: 1rem; background: #222; text-align: center; font-size: 1.5rem; }
+    nav { display: flex; justify-content: center; background: #333; flex-wrap: wrap; }
+    nav button {
+      background: none; border:none; color:#ccc; padding: 1rem 2rem; cursor:pointer; font-size: 1rem;
+    }
+    nav button.active { background: #555; color: #fff; }
+    main { padding: 1rem; }
+    #connectionPage, #gridPage, #musicPage, #modsPage { display:none; }
+    #grid {
+      display: grid; grid-template-columns: repeat(8, 40px); grid-gap: 4px; justify-content:center; margin: 20px 0;
+    }
+    .cell {
+      width: 40px; height: 40px; background: black; border-radius: 4px; cursor:pointer;
+    }
+    .color-picker {
+      text-align: center; margin-bottom: 15px;
+    }
+    .color-circle {
+      display: inline-block; width: 35px; height: 35px; border-radius: 50%; margin: 0 10px; cursor: pointer; border: 3px solid transparent;
+    }
+    .color-circle.selected { border-color: yellow; }
+    #musicStatus {
+      margin-top: 20px; text-align:center; font-weight:bold;
+    }
+    #modsPage button {
+      margin: 5px; padding: 0.5rem 1rem; background: #444; color: white; border: none; border-radius: 4px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+<header>RGB Lamp Controller Bluetooth</header>
+<nav>
+  <button id="btnConnect" class="active">Połączenie</button>
+  <button id="btnGrid">Siatka LED</button>
+  <button id="btnMusic">Mod muzyczny</button>
+  <button id="btnMods">Mody</button>
+</nav>
+<main>
+  <section id="connectionPage">
+    <button id="btnRequestBluetooth">Połącz przez Bluetooth</button>
+    <p id="connStatus">Nie połączono</p>
+  </section>
+  <section id="gridPage">
+    <div class="color-picker">
+      <div id="red" class="color-circle selected" style="background:red;"></div>
+      <div id="green" class="color-circle" style="background:green;"></div>
+      <div id="blue" class="color-circle" style="background:blue;"></div>
+      <div id="yellow" class="color-circle" style="background:yellow;"></div>
+      <div id="purple" class="color-circle" style="background:purple;"></div>
+      <div id="orange" class="color-circle" style="background:orange;"></div>
+    </div>
+    <div id="grid"></div>
+    <button id="btnSendGrid">Wyślij do lampy</button>
+    <p id="sendStatus"></p>
+  </section>
+  <section id="musicPage">
+    <button id="btnStartMusicMod">Start Modu Muzyczny</button>
+    <button id="btnStopMusicMod" disabled>Zatrzymaj Modu Muzyczny</button>
+    <p id="musicStatus">Mod muzyczny nieaktywny</p>
+  </section>
+  <section id="modsPage">
+    <h3>Wybierz efekt LED</h3>
+    <button onclick="startBlink()">Miganie</button>
+    <button onclick="startHeart()">Serce</button>
+    <button onclick="startRainbow()">Tęcza</button>
+    <button onclick="startPulse()">Pulsowanie</button>
+    <button onclick="startRandom()">Losowe błyski</button>
+    <button onclick="stopEffects()">Zatrzymaj efekty</button>
+  </section>
+</main>
+
+<script>
+  // Jasność w zakresie 0–255
+  const BRIGHTNESS = 50;
+
+  // Skaluje wartości RGB zgodnie z ustawioną jasnością
+  function applyBrightness(r, g, b) {
+    const scale = BRIGHTNESS / 255;
+    return {
+      r: Math.round(r * scale),
+      g: Math.round(g * scale),
+      b: Math.round(b * scale),
+    };
+  }
+
+  // Modyfikacja: wysyłanie danych z siatki
+  btnSendGrid.addEventListener('click', async () => {
+    if (!writeCharacteristic) return sendStatus.textContent = 'Nie połączono z lampą!';
+    let data = new Uint8Array(192);
+    for (let i = 0; i < 64; i++) {
+      let rgb = parseRGB(cells[i].style.backgroundColor);
+      let adjusted = applyBrightness(rgb.r, rgb.g, rgb.b);
+      data[i * 3] = adjusted.r;
+      data[i * 3 + 1] = adjusted.g;
+      data[i * 3 + 2] = adjusted.b;
+    }
+    try {
+      await writeCharacteristic.writeValue(data);
+      sendStatus.textContent = 'Dane wysłane!';
+    } catch (e) {
+      sendStatus.textContent = 'Błąd: ' + e;
+    }
+  });
+
+  // Modyfikacja funkcji efektów — dodaj applyBrightness()
+
+  function sendUniformColor(r, g, b) {
+    if (!writeCharacteristic) return;
+    const { r: rr, g: gg, b: bb } = applyBrightness(r, g, b);
+    const data = new Uint8Array(192);
+    for (let i = 0; i < 64; i++) {
+      data[i * 3] = rr;
+      data[i * 3 + 1] = gg;
+      data[i * 3 + 2] = bb;
+    }
+    writeCharacteristic.writeValue(data).catch(console.error);
+  }
+
+  function startBlink() {
+    stopEffects();
+    let on = false;
+    effectInterval = setInterval(() => {
+      on = !on;
+      const { r, g, b } = applyBrightness(on ? 255 : 0, 0, on ? 255 : 0);
+      sendUniformColor(r, g, b);
+    }, 500);
+  }
+
+  function startPulse() {
+    stopEffects();
+    let i = 0;
+    effectInterval = setInterval(() => {
+      let val = Math.floor(128 + 127 * Math.sin(i * 0.1));
+      const { r, g, b } = applyBrightness(val, 0, val);
+      sendUniformColor(r, g, b);
+      i++;
+    }, 50);
+  }
+
+  function startRandom() {
+    stopEffects();
+    effectInterval = setInterval(() => {
+      const data = new Uint8Array(192);
+      for (let i = 0; i < 64; i++) {
+        let r = Math.random() * 255;
+        let g = Math.random() * 255;
+        let b = Math.random() * 255;
+        const adj = applyBrightness(r, g, b);
+        data[i * 3] = adj.r;
+        data[i * 3 + 1] = adj.g;
+        data[i * 3 + 2] = adj.b;
+      }
+      writeCharacteristic?.writeValue(data).catch(console.error);
+    }, 200);
+  }
+
+  function startRainbow() {
+    stopEffects();
+    let hue = 0;
+    effectInterval = setInterval(() => {
+      const data = new Uint8Array(192);
+      for (let i = 0; i < 64; i++) {
+        const h = (hue + i * 5) % 360;
+        const { r, g, b } = hslToRgb(h / 360, 1, 0.5);
+        const adj = applyBrightness(r, g, b);
+        data[i * 3] = adj.r;
+        data[i * 3 + 1] = adj.g;
+        data[i * 3 + 2] = adj.b;
+      }
+      writeCharacteristic?.writeValue(data).catch(console.error);
+      hue = (hue + 5) % 360;
+    }, 150);
+  }
+
+  function startHeart() {
+    stopEffects();
+    const pattern = [
+      0,255,0,0,0,0,255,0,
+      255,255,0,0,0,0,255,255,
+      255,255,255,0,0,255,255,255,
+      255,255,255,255,255,255,255,255,
+      255,255,255,255,255,255,255,255,
+      0,255,255,255,255,255,255,0,
+      0,0,255,255,255,255,0,0,
+      0,0,0,255,255,0,0,0
+    ];
+    effectInterval = setInterval(() => {
+      const data = new Uint8Array(192);
+      for(let i=0; i<64; i++) {
+        const val = pattern[i];
+        const { r, g, b } = applyBrightness(val, 0, val);
+        data[i*3] = r;
+        data[i*3+1] = g;
+        data[i*3+2] = b;
+      }
+      writeCharacteristic?.writeValue(data).catch(console.error);
+    }, 500);
+  }
+</script>
+</body>
+</html>
