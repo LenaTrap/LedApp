@@ -1,124 +1,192 @@
 <!DOCTYPE html>
-<html>
+<html lang="pl">
 <head>
-<meta charset="UTF-8">
-<title>ESP32 9x9 LED Controller</title>
-
-<style>
-body {
-  font-family: Arial;
-  text-align: center;
-  background: #111;
-  color: white;
-}
-
-#grid {
-  display: grid;
-  grid-template-columns: repeat(9, 40px);
-  gap: 4px;
-  justify-content: center;
-  margin-top: 20px;
-}
-
-.pixel {
-  width: 40px;
-  height: 40px;
-  background: black;
-  border: 1px solid #333;
-  cursor: pointer;
-}
-
-button {
-  margin: 10px;
-  padding: 10px 20px;
-  font-size: 16px;
-}
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RGB Lamp Controller Bluetooth</title>
+  <style>
+    body { background: #111; color: white; font-family: Arial, sans-serif; margin:0; padding:0;}
+    header { padding: 1rem; background: #222; text-align: center; font-size: 1.5rem; }
+    nav { display: flex; justify-content: center; background: #333; flex-wrap: wrap; }
+    nav button {
+      background: none; border:none; color:#ccc; padding: 1rem 2rem; cursor:pointer; font-size: 1rem;
+    }
+    nav button.active { background: #555; color: #fff; }
+    main { padding: 1rem; }
+    #connectionPage, #gridPage, #musicPage, #modsPage { display:none; }
+    #grid {
+      display: grid; 
+      grid-template-columns: repeat(9, 40px); /* changed to 9 */
+      grid-gap: 4px; 
+      justify-content:center; 
+      margin: 20px 0;
+    }
+    .cell {
+      width: 40px; height: 40px; background: black; border-radius: 4px; cursor:pointer;
+    }
+    .color-picker {
+      text-align: center; margin-bottom: 15px;
+    }
+    .color-circle {
+      display: inline-block; width: 35px; height: 35px; border-radius: 50%; margin: 0 10px; cursor: pointer; border: 3px solid transparent;
+    }
+    .color-circle.selected { border-color: yellow; }
+    #musicStatus {
+      margin-top: 20px; text-align:center; font-weight:bold;
+    }
+    #modsPage button {
+      margin: 5px; padding: 0.5rem 1rem; background: #444; color: white; border: none; border-radius: 4px;
+      cursor: pointer;
+    }
+  </style>
 </head>
-
 <body>
-
-<h2>ESP32 9x9 LED Controller</h2>
-
-<input type="color" id="colorPicker" value="#ff0000">
-
-<br>
-
-<button onclick="connect()">Connect</button>
-<button onclick="sendData()">Send to ESP32</button>
-
-<div id="grid"></div>
+<header>RGB Lamp Controller Bluetooth</header>
+<nav>
+  <button id="btnConnect" class="active">Połączenie</button>
+  <button id="btnGrid">Siatka LED</button>
+  <button id="btnMusic">Mod muzyczny</button>
+  <button id="btnMods">Mody</button>
+</nav>
+<main>
+  <section id="connectionPage">
+    <button id="btnRequestBluetooth">Połącz przez Bluetooth</button>
+    <p id="connStatus">Nie połączono</p>
+  </section>
+  <section id="gridPage">
+    <div class="color-picker">
+      <div id="red" class="color-circle selected" style="background:red;"></div>
+      <div id="green" class="color-circle" style="background:green;"></div>
+      <div id="blue" class="color-circle" style="background:blue;"></div>
+      <div id="yellow" class="color-circle" style="background:yellow;"></div>
+      <div id="purple" class="color-circle" style="background:purple;"></div>
+      <div id="orange" class="color-circle" style="background:orange;"></div>
+    </div>
+    <div id="grid"></div>
+    <button id="btnSendGrid">Wyślij do lampy</button>
+    <p id="sendStatus"></p>
+  </section>
+  <section id="musicPage">
+    <button id="btnStartMusicMod">Start Modu Muzyczny</button>
+    <button id="btnStopMusicMod" disabled>Zatrzymaj Modu Muzyczny</button>
+    <p id="musicStatus">Mod muzyczny nieaktywny</p>
+  </section>
+  <section id="modsPage">
+    <h3>Wybierz efekt LED</h3>
+    <button onclick="startBlink()">Miganie</button>
+    <button onclick="startHeart()">Serce</button>
+    <button onclick="startRainbow()">Tęcza</button>
+    <button onclick="startPulse()">Pulsowanie</button>
+    <button onclick="startRandom()">Losowe błyski</button>
+    <button onclick="stopEffects()">Zatrzymaj efekty</button>
+  </section>
+</main>
 
 <script>
+  const NUM_LEDS = 81; /* changed */
 
-const SERVICE_UUID = "12345678-1234-1234-1234-1234567890ab";
-const CHARACTERISTIC_UUID = "abcd1234-5678-90ab-cdef-1234567890ab";
+  const btnConnect = document.getElementById('btnConnect');
+  const btnGrid = document.getElementById('btnGrid');
+  const btnMusic = document.getElementById('btnMusic');
+  const btnMods = document.getElementById('btnMods');
 
-let device;
-let characteristic;
+  const connectionPage = document.getElementById('connectionPage');
+  const gridPage = document.getElementById('gridPage');
+  const musicPage = document.getElementById('musicPage');
+  const modsPage = document.getElementById('modsPage');
 
-const NUM_LEDS = 81;
-let ledColors = new Array(NUM_LEDS).fill({r:0,g:0,b:0});
+  function showPage(page) {
+    connectionPage.style.display = 'none';
+    gridPage.style.display = 'none';
+    musicPage.style.display = 'none';
+    modsPage.style.display = 'none';
+    page.style.display = 'block';
+  }
 
-const grid = document.getElementById("grid");
+  function setActiveButton(activeBtn) {
+    [btnConnect, btnGrid, btnMusic, btnMods].forEach(b => b.classList.remove('active'));
+    activeBtn.classList.add('active');
+  }
 
-// Create 9x9 grid
-for (let i = 0; i < NUM_LEDS; i++) {
-  const div = document.createElement("div");
-  div.className = "pixel";
-  div.dataset.index = i;
+  btnConnect.addEventListener('click', () => { showPage(connectionPage); setActiveButton(btnConnect); });
+  btnGrid.addEventListener('click', () => { showPage(gridPage); setActiveButton(btnGrid); });
+  btnMusic.addEventListener('click', () => { showPage(musicPage); setActiveButton(btnMusic); });
+  btnMods.addEventListener('click', () => { showPage(modsPage); setActiveButton(btnMods); });
 
-  div.addEventListener("click", () => {
-    const color = document.getElementById("colorPicker").value;
-    div.style.background = color;
+  showPage(connectionPage);
 
-    const rgb = hexToRgb(color);
-    ledColors[i] = rgb;
+  let bluetoothDevice, gattServer, service, writeCharacteristic;
+
+  const SERVICE_UUID = '12345678-1234-1234-1234-1234567890ab';
+  const CHARACTERISTIC_UUID = '87654321-4321-4321-4321-0987654321ba';
+
+  document.getElementById('btnRequestBluetooth').addEventListener('click', async () => {
+    try {
+      const device = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: [SERVICE_UUID]
+      });
+
+      const server = await device.gatt.connect();
+      const srv = await server.getPrimaryService(SERVICE_UUID);
+      const characteristic = await srv.getCharacteristic(CHARACTERISTIC_UUID);
+
+      writeCharacteristic = characteristic;
+      document.getElementById('connStatus').textContent = "Połączono!";
+    } catch (e) {
+      document.getElementById('connStatus').textContent = "Błąd: " + e.message;
+    }
   });
 
-  grid.appendChild(div);
-}
+  const grid = document.getElementById('grid');
+  const btnSendGrid = document.getElementById('btnSendGrid');
+  const sendStatus = document.getElementById('sendStatus');
 
-function hexToRgb(hex) {
-  const bigint = parseInt(hex.slice(1), 16);
-  return {
-    r: (bigint >> 16) & 255,
-    g: (bigint >> 8) & 255,
-    b: bigint & 255
+  const colors = {
+    red: '#FF0000', green: '#00FF00', blue: '#0000FF',
+    yellow: '#FFFF00', purple: '#800080', orange: '#FFA500', black: '#000000'
   };
-}
 
-async function connect() {
-  device = await navigator.bluetooth.requestDevice({
-    filters: [{ name: "ESP32_LED_81" }],
-    optionalServices: [SERVICE_UUID]
+  let selectedColor = 'red', cells = [];
+
+  document.querySelectorAll('.color-circle').forEach(el => {
+    el.addEventListener('click', () => {
+      document.querySelectorAll('.color-circle').forEach(c => c.classList.remove('selected'));
+      el.classList.add('selected');
+      selectedColor = el.id;
+    });
   });
 
-  const server = await device.gatt.connect();
-  const service = await server.getPrimaryService(SERVICE_UUID);
-  characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
-
-  alert("Connected!");
-}
-
-async function sendData() {
-  if (!characteristic) {
-    alert("Not connected!");
-    return;
+  for (let i = 0; i < NUM_LEDS; i++) { /* changed */
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    cell.style.backgroundColor = colors.black;
+    cell.addEventListener('click', () => {
+      cell.style.backgroundColor = colors[selectedColor];
+    });
+    grid.appendChild(cell);
+    cells.push(cell);
   }
 
-  const data = new Uint8Array(NUM_LEDS * 3);
+  btnSendGrid.addEventListener('click', async () => {
+    if (!writeCharacteristic) return sendStatus.textContent = 'Nie połączono!';
+    let data = new Uint8Array(NUM_LEDS * 3); /* changed */
+    for (let i = 0; i < NUM_LEDS; i++) { /* changed */
+      let rgb = parseRGB(cells[i].style.backgroundColor);
+      data[i * 3] = rgb.r;
+      data[i * 3 + 1] = rgb.g;
+      data[i * 3 + 2] = rgb.b;
+    }
+    await writeCharacteristic.writeValue(data);
+    sendStatus.textContent = 'Dane wysłane!';
+  });
 
-  for (let i = 0; i < NUM_LEDS; i++) {
-    data[i * 3]     = ledColors[i].r;
-    data[i * 3 + 1] = ledColors[i].g;
-    data[i * 3 + 2] = ledColors[i].b;
+  function parseRGB(rgbString) {
+    const result = rgbString.match(/\d+/g);
+    return { r: parseInt(result[0]), g: parseInt(result[1]), b: parseInt(result[2]) };
   }
-
-  await characteristic.writeValue(data);
-}
 
 </script>
-
 </body>
 </html>
+
