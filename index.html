@@ -1,350 +1,124 @@
 <!DOCTYPE html>
-<html lang="pl">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>RGB Lamp Controller Bluetooth</title>
-  <style>
-    body { background: #111; color: white; font-family: Arial, sans-serif; margin:0; padding:0;}
-    header { padding: 1rem; background: #222; text-align: center; font-size: 1.5rem; }
-    nav { display: flex; justify-content: center; background: #333; flex-wrap: wrap; }
-    nav button {
-      background: none; border:none; color:#ccc; padding: 1rem 2rem; cursor:pointer; font-size: 1rem;
-    }
-    nav button.active { background: #555; color: #fff; }
-    main { padding: 1rem; }
-    #connectionPage, #gridPage, #musicPage, #modsPage { display:none; }
-    #grid {
-      display: grid; grid-template-columns: repeat(8, 40px); grid-gap: 4px; justify-content:center; margin: 20px 0;
-    }
-    .cell {
-      width: 40px; height: 40px; background: black; border-radius: 4px; cursor:pointer;
-    }
-    .color-picker {
-      text-align: center; margin-bottom: 15px;
-    }
-    .color-circle {
-      display: inline-block; width: 35px; height: 35px; border-radius: 50%; margin: 0 10px; cursor: pointer; border: 3px solid transparent;
-    }
-    .color-circle.selected { border-color: yellow; }
-    #musicStatus {
-      margin-top: 20px; text-align:center; font-weight:bold;
-    }
-    #modsPage button {
-      margin: 5px; padding: 0.5rem 1rem; background: #444; color: white; border: none; border-radius: 4px;
-      cursor: pointer;
-    }
-  </style>
+<meta charset="UTF-8">
+<title>ESP32 9x9 LED Controller</title>
+
+<style>
+body {
+  font-family: Arial;
+  text-align: center;
+  background: #111;
+  color: white;
+}
+
+#grid {
+  display: grid;
+  grid-template-columns: repeat(9, 40px);
+  gap: 4px;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+.pixel {
+  width: 40px;
+  height: 40px;
+  background: black;
+  border: 1px solid #333;
+  cursor: pointer;
+}
+
+button {
+  margin: 10px;
+  padding: 10px 20px;
+  font-size: 16px;
+}
+</style>
 </head>
+
 <body>
-<header>RGB Lamp Controller Bluetooth</header>
-<nav>
-  <button id="btnConnect" class="active">Połączenie</button>
-  <button id="btnGrid">Siatka LED</button>
-  <button id="btnMusic">Mod muzyczny</button>
-  <button id="btnMods">Mody</button>
-</nav>
-<main>
-  <section id="connectionPage">
-    <button id="btnRequestBluetooth">Połącz przez Bluetooth</button>
-    <p id="connStatus">Nie połączono</p>
-  </section>
-  <section id="gridPage">
-    <div class="color-picker">
-      <div id="red" class="color-circle selected" style="background:red;"></div>
-      <div id="green" class="color-circle" style="background:green;"></div>
-      <div id="blue" class="color-circle" style="background:blue;"></div>
-      <div id="yellow" class="color-circle" style="background:yellow;"></div>
-      <div id="purple" class="color-circle" style="background:purple;"></div>
-      <div id="orange" class="color-circle" style="background:orange;"></div>
-    </div>
-    <div id="grid"></div>
-    <button id="btnSendGrid">Wyślij do lampy</button>
-    <p id="sendStatus"></p>
-  </section>
-  <section id="musicPage">
-    <button id="btnStartMusicMod">Start Modu Muzyczny</button>
-    <button id="btnStopMusicMod" disabled>Zatrzymaj Modu Muzyczny</button>
-    <p id="musicStatus">Mod muzyczny nieaktywny</p>
-  </section>
-  <section id="modsPage">
-    <h3>Wybierz efekt LED</h3>
-    <button onclick="startBlink()">Miganie</button>
-    <button onclick="startHeart()">Serce</button>
-    <button onclick="startRainbow()">Tęcza</button>
-    <button onclick="startPulse()">Pulsowanie</button>
-    <button onclick="startRandom()">Losowe błyski</button>
-    <button onclick="stopEffects()">Zatrzymaj efekty</button>
-  </section>
-</main>
+
+<h2>ESP32 9x9 LED Controller</h2>
+
+<input type="color" id="colorPicker" value="#ff0000">
+
+<br>
+
+<button onclick="connect()">Connect</button>
+<button onclick="sendData()">Send to ESP32</button>
+
+<div id="grid"></div>
 
 <script>
-  const btnConnect = document.getElementById('btnConnect');
-  const btnGrid = document.getElementById('btnGrid');
-  const btnMusic = document.getElementById('btnMusic');
-  const btnMods = document.getElementById('btnMods');
 
-  const connectionPage = document.getElementById('connectionPage');
-  const gridPage = document.getElementById('gridPage');
-  const musicPage = document.getElementById('musicPage');
-  const modsPage = document.getElementById('modsPage');
+const SERVICE_UUID = "12345678-1234-1234-1234-1234567890ab";
+const CHARACTERISTIC_UUID = "abcd1234-5678-90ab-cdef-1234567890ab";
 
-  function showPage(page) {
-    connectionPage.style.display = 'none';
-    gridPage.style.display = 'none';
-    musicPage.style.display = 'none';
-    modsPage.style.display = 'none';
-    page.style.display = 'block';
-  }
+let device;
+let characteristic;
 
-  function setActiveButton(activeBtn) {
-    [btnConnect, btnGrid, btnMusic, btnMods].forEach(b => b.classList.remove('active'));
-    activeBtn.classList.add('active');
-  }
+const NUM_LEDS = 81;
+let ledColors = new Array(NUM_LEDS).fill({r:0,g:0,b:0});
 
-  btnConnect.addEventListener('click', () => { showPage(connectionPage); setActiveButton(btnConnect); });
-  btnGrid.addEventListener('click', () => { showPage(gridPage); setActiveButton(btnGrid); });
-  btnMusic.addEventListener('click', () => { showPage(musicPage); setActiveButton(btnMusic); });
-  btnMods.addEventListener('click', () => { showPage(modsPage); setActiveButton(btnMods); });
+const grid = document.getElementById("grid");
 
-  showPage(connectionPage);
+// Create 9x9 grid
+for (let i = 0; i < NUM_LEDS; i++) {
+  const div = document.createElement("div");
+  div.className = "pixel";
+  div.dataset.index = i;
 
-  let bluetoothDevice, gattServer, service, writeCharacteristic;
+  div.addEventListener("click", () => {
+    const color = document.getElementById("colorPicker").value;
+    div.style.background = color;
 
-  const SERVICE_UUID = '12345678-1234-1234-1234-1234567890ab';
-  const CHARACTERISTIC_UUID = '87654321-4321-4321-4321-0987654321ba';
-
-  // --- POPRAWIONY FRAGMENT ---
-  document.getElementById('btnRequestBluetooth').addEventListener('click', async () => {
-    try {
-      const device = await navigator.bluetooth.requestDevice({
-        acceptAllDevices: true,
-        optionalServices: [SERVICE_UUID]
-      });
-
-      if (!device.gatt) {
-        document.getElementById('connStatus').textContent = "Urządzenie nie obsługuje GATT!";
-        return;
-      }
-
-      const server = await device.gatt.connect();
-      const srv = await server.getPrimaryService(SERVICE_UUID);
-      const characteristic = await srv.getCharacteristic(CHARACTERISTIC_UUID);
-
-      bluetoothDevice = device;
-      gattServer = server;
-      service = srv;
-      writeCharacteristic = characteristic;
-
-      document.getElementById('connStatus').textContent = "Połączono z: " + (device.name || "Nieznane urządzenie");
-    } catch (e) {
-      document.getElementById('connStatus').textContent = "Błąd połączenia: " + e.message;
-      console.error(e);
-    }
+    const rgb = hexToRgb(color);
+    ledColors[i] = rgb;
   });
-  // --- KONIEC POPRAWKI ---
 
-  const grid = document.getElementById('grid');
-  const btnSendGrid = document.getElementById('btnSendGrid');
-  const sendStatus = document.getElementById('sendStatus');
-  const colors = {
-    red: '#FF0000', green: '#00FF00', blue: '#0000FF',
-    yellow: '#FFFF00', purple: '#800080', orange: '#FFA500', black: '#000000'
+  grid.appendChild(div);
+}
+
+function hexToRgb(hex) {
+  const bigint = parseInt(hex.slice(1), 16);
+  return {
+    r: (bigint >> 16) & 255,
+    g: (bigint >> 8) & 255,
+    b: bigint & 255
   };
-  let selectedColor = 'red', cells = [];
+}
 
-  document.querySelectorAll('.color-circle').forEach(el => {
-    el.addEventListener('click', () => {
-      document.querySelectorAll('.color-circle').forEach(c => c.classList.remove('selected'));
-      el.classList.add('selected');
-      selectedColor = el.id;
-    });
+async function connect() {
+  device = await navigator.bluetooth.requestDevice({
+    filters: [{ name: "ESP32_LED_81" }],
+    optionalServices: [SERVICE_UUID]
   });
 
-  for (let i = 0; i < 64; i++) {
-    const cell = document.createElement('div');
-    cell.className = 'cell';
-    cell.style.backgroundColor = colors.black;
-    cell.addEventListener('click', () => {
-      cell.style.backgroundColor = colors[selectedColor];
-    });
-    grid.appendChild(cell);
-    cells.push(cell);
+  const server = await device.gatt.connect();
+  const service = await server.getPrimaryService(SERVICE_UUID);
+  characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+
+  alert("Connected!");
+}
+
+async function sendData() {
+  if (!characteristic) {
+    alert("Not connected!");
+    return;
   }
 
-  btnSendGrid.addEventListener('click', async () => {
-    if (!writeCharacteristic) return sendStatus.textContent = 'Nie połączono z lampą!';
-    let data = new Uint8Array(192);
-    for (let i = 0; i < 64; i++) {
-      let rgb = parseRGB(cells[i].style.backgroundColor);
-      data[i * 3] = rgb.r;
-      data[i * 3 + 1] = rgb.g;
-      data[i * 3 + 2] = rgb.b;
-    }
-    try {
-      await writeCharacteristic.writeValue(data);
-      sendStatus.textContent = 'Dane wysłane!';
-    } catch (e) {
-      sendStatus.textContent = 'Błąd: ' + e.message;
-    }
-  });
+  const data = new Uint8Array(NUM_LEDS * 3);
 
-  function parseRGB(rgbString) {
-    const result = rgbString.match(/\d+/g);
-    return { r: parseInt(result[0]), g: parseInt(result[1]), b: parseInt(result[2]) };
+  for (let i = 0; i < NUM_LEDS; i++) {
+    data[i * 3]     = ledColors[i].r;
+    data[i * 3 + 1] = ledColors[i].g;
+    data[i * 3 + 2] = ledColors[i].b;
   }
 
-  // --- MODY LED ---
-  let effectInterval;
+  await characteristic.writeValue(data);
+}
 
-  function stopEffects() {
-    clearInterval(effectInterval);
-  }
-
-  function sendUniformColor(r, g, b) {
-    if (!writeCharacteristic) return;
-    const data = new Uint8Array(192);
-    for (let i = 0; i < 64; i++) {
-      data[i * 3] = r;
-      data[i * 3 + 1] = g;
-      data[i * 3 + 2] = b;
-    }
-    writeCharacteristic.writeValue(data).catch(console.error);
-  }
-
-  function startBlink() {
-    stopEffects();
-    let on = false;
-    effectInterval = setInterval(() => {
-      on = !on;
-      sendUniformColor(on ? 255 : 0, 0, on ? 255 : 0);
-    }, 500);
-  }
-
-  function startPulse() {
-    stopEffects();
-    let i = 0;
-    effectInterval = setInterval(() => {
-      let val = Math.floor(128 + 127 * Math.sin(i * 0.1));
-      sendUniformColor(val, 0, val);
-      i++;
-    }, 50);
-  }
-
-  function startRandom() {
-    stopEffects();
-    effectInterval = setInterval(() => {
-      const data = new Uint8Array(192);
-      for (let i = 0; i < 64; i++) {
-        data[i * 3] = Math.random() * 255;
-        data[i * 3 + 1] = Math.random() * 255;
-        data[i * 3 + 2] = Math.random() * 255;
-      }
-      writeCharacteristic?.writeValue(data).catch(console.error);
-    }, 200);
-  }
-
-  function startRainbow() {
-    stopEffects();
-    let hue = 0;
-    effectInterval = setInterval(() => {
-      const data = new Uint8Array(192);
-      for (let i = 0; i < 64; i++) {
-        const h = (hue + i * 5) % 360;
-        const { r, g, b } = hslToRgb(h / 360, 1, 0.5);
-        data[i * 3] = r;
-        data[i * 3 + 1] = g;
-        data[i * 3 + 2] = b;
-      }
-      writeCharacteristic?.writeValue(data).catch(console.error);
-      hue = (hue + 5) % 360;
-    }, 150);
-  }
-
-  function hslToRgb(h, s, l) {
-    let r, g, b;
-    if (s === 0) r = g = b = l;
-    else {
-      const hue2rgb = (p, q, t) => {
-        if(t < 0) t += 1;
-        if(t > 1) t -= 1;
-        if(t < 1/6) return p + (q - p) * 6 * t;
-        if(t < 1/2) return q;
-        if(t < 2/3) return p + (q - p) * (2/3 - t) * 6;
-        return p;
-      };
-      const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-      const p = 2 * l - q;
-      r = hue2rgb(p, q, h + 1/3);
-      g = hue2rgb(p, q, h);
-      b = hue2rgb(p, q, h - 1/3);
-    }
-    return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
-  }
-
-  function startHeart() {
-    stopEffects();
-    const pattern = [
-      0,255,0,0,0,0,255,0,
-      255,255,0,0,0,0,255,255,
-      255,255,255,0,0,255,255,255,
-      255,255,255,255,255,255,255,255,
-      255,255,255,255,255,255,255,255,
-      0,255,255,255,255,255,255,0,
-      0,0,255,255,255,255,0,0,
-      0,0,0,255,255,0,0,0
-    ];
-    effectInterval = setInterval(() => {
-      const data = new Uint8Array(192);
-      for(let i=0; i<64; i++) {
-        const val = pattern[i];
-        data[i*3] = val;
-        data[i*3+1] = 0;
-        data[i*3+2] = val;
-      }
-      writeCharacteristic?.writeValue(data).catch(console.error);
-    }, 500);
-
-// --- STEROWANIE GŁOSEM ---
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let recognition;
-
-  if (SpeechRecognition) {
-    const voiceBtn = document.createElement("button");
-    voiceBtn.textContent = "Sterowanie głosem ";
-   voiceBtn.style.marginTop = "15px";
-    connectionPage.appendChild(voiceBtn);
-
-    recognition = new SpeechRecognition();
-    recognition.lang = "pl-PL";
-    recognition.continuous = false;
-
-    voiceBtn.addEventListener("click", () => {
-      recognition.start();
-      document.getElementById('connStatus').textContent = "Nasłuchiwanie...";
-    });
-
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript.toLowerCase();
-      document.getElementById('connStatus').textContent = "Powiedziano: " + transcript;
-
-      if (transcript.includes("czerwony")) sendUniformColor(255, 0, 0);
-      else if (transcript.includes("zielony")) sendUniformColor(0, 255, 0);
-      else if (transcript.includes("niebieski")) sendUniformColor(0, 0, 255);
-      else if (transcript.includes("żółty")) sendUniformColor(255, 255, 0);
-      else if (transcript.includes("fioletowy") || transcript.includes("purpurowy")) sendUniformColor(128, 0, 128);
-      else if (transcript.includes("pomarańczowy")) sendUniformColor(255, 165, 0);
-      else if (transcript.includes("tęcza")) startRainbow();
-      else if (transcript.includes("stop")) stopEffects();
-    };
-
-    recognition.onerror = (event) => {
-      document.getElementById('connStatus').textContent = "Błąd rozpoznawania: " + event.error;
-    };
-  } else {
-    console.warn("Web Speech API nie jest wspierane w tej przeglądarce.");
-  }
-  }
 </script>
+
 </body>
 </html>
