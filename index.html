@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pl">
 <head>
@@ -6,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>RGB Lamp Controller Bluetooth</title>
   <style>
-    /* [CSS – bez zmian] */
     body { background: #111; color: white; font-family: Arial, sans-serif; margin:0; padding:0;}
     header { padding: 1rem; background: #222; text-align: center; font-size: 1.5rem; }
     nav { display: flex; justify-content: center; background: #333; flex-wrap: wrap; }
@@ -81,48 +79,135 @@
 </main>
 
 <script>
-  // Jasność w zakresie 0–255
-  const BRIGHTNESS = 50;
+  const btnConnect = document.getElementById('btnConnect');
+  const btnGrid = document.getElementById('btnGrid');
+  const btnMusic = document.getElementById('btnMusic');
+  const btnMods = document.getElementById('btnMods');
 
-  // Skaluje wartości RGB zgodnie z ustawioną jasnością
-  function applyBrightness(r, g, b) {
-    const scale = BRIGHTNESS / 255;
-    return {
-      r: Math.round(r * scale),
-      g: Math.round(g * scale),
-      b: Math.round(b * scale),
-    };
+  const connectionPage = document.getElementById('connectionPage');
+  const gridPage = document.getElementById('gridPage');
+  const musicPage = document.getElementById('musicPage');
+  const modsPage = document.getElementById('modsPage');
+
+  function showPage(page) {
+    connectionPage.style.display = 'none';
+    gridPage.style.display = 'none';
+    musicPage.style.display = 'none';
+    modsPage.style.display = 'none';
+    page.style.display = 'block';
   }
 
-  // Modyfikacja: wysyłanie danych z siatki
+  function setActiveButton(activeBtn) {
+    [btnConnect, btnGrid, btnMusic, btnMods].forEach(b => b.classList.remove('active'));
+    activeBtn.classList.add('active');
+  }
+
+  btnConnect.addEventListener('click', () => { showPage(connectionPage); setActiveButton(btnConnect); });
+  btnGrid.addEventListener('click', () => { showPage(gridPage); setActiveButton(btnGrid); });
+  btnMusic.addEventListener('click', () => { showPage(musicPage); setActiveButton(btnMusic); });
+  btnMods.addEventListener('click', () => { showPage(modsPage); setActiveButton(btnMods); });
+
+  showPage(connectionPage);
+
+  let bluetoothDevice, gattServer, service, writeCharacteristic;
+
+  const SERVICE_UUID = '12345678-1234-1234-1234-1234567890ab';
+  const CHARACTERISTIC_UUID = '87654321-4321-4321-4321-0987654321ba';
+
+  // --- POPRAWIONY FRAGMENT ---
+  document.getElementById('btnRequestBluetooth').addEventListener('click', async () => {
+    try {
+      const device = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: [SERVICE_UUID]
+      });
+
+      if (!device.gatt) {
+        document.getElementById('connStatus').textContent = "Urządzenie nie obsługuje GATT!";
+        return;
+      }
+
+      const server = await device.gatt.connect();
+      const srv = await server.getPrimaryService(SERVICE_UUID);
+      const characteristic = await srv.getCharacteristic(CHARACTERISTIC_UUID);
+
+      bluetoothDevice = device;
+      gattServer = server;
+      service = srv;
+      writeCharacteristic = characteristic;
+
+      document.getElementById('connStatus').textContent = "Połączono z: " + (device.name || "Nieznane urządzenie");
+    } catch (e) {
+      document.getElementById('connStatus').textContent = "Błąd połączenia: " + e.message;
+      console.error(e);
+    }
+  });
+  // --- KONIEC POPRAWKI ---
+
+  const grid = document.getElementById('grid');
+  const btnSendGrid = document.getElementById('btnSendGrid');
+  const sendStatus = document.getElementById('sendStatus');
+  const colors = {
+    red: '#FF0000', green: '#00FF00', blue: '#0000FF',
+    yellow: '#FFFF00', purple: '#800080', orange: '#FFA500', black: '#000000'
+  };
+  let selectedColor = 'red', cells = [];
+
+  document.querySelectorAll('.color-circle').forEach(el => {
+    el.addEventListener('click', () => {
+      document.querySelectorAll('.color-circle').forEach(c => c.classList.remove('selected'));
+      el.classList.add('selected');
+      selectedColor = el.id;
+    });
+  });
+
+  for (let i = 0; i < 81; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    cell.style.backgroundColor = colors.black;
+    cell.addEventListener('click', () => {
+      cell.style.backgroundColor = colors[selectedColor];
+    });
+    grid.appendChild(cell);
+    cells.push(cell);
+  }
+
   btnSendGrid.addEventListener('click', async () => {
     if (!writeCharacteristic) return sendStatus.textContent = 'Nie połączono z lampą!';
     let data = new Uint8Array(192);
-    for (let i = 0; i < 64; i++) {
+    for (let i = 0; i < 81; i++) {
       let rgb = parseRGB(cells[i].style.backgroundColor);
-      let adjusted = applyBrightness(rgb.r, rgb.g, rgb.b);
-      data[i * 3] = adjusted.r;
-      data[i * 3 + 1] = adjusted.g;
-      data[i * 3 + 2] = adjusted.b;
+      data[i * 3] = rgb.r;
+      data[i * 3 + 1] = rgb.g;
+      data[i * 3 + 2] = rgb.b;
     }
     try {
       await writeCharacteristic.writeValue(data);
       sendStatus.textContent = 'Dane wysłane!';
     } catch (e) {
-      sendStatus.textContent = 'Błąd: ' + e;
+      sendStatus.textContent = 'Błąd: ' + e.message;
     }
   });
 
-  // Modyfikacja funkcji efektów — dodaj applyBrightness()
+  function parseRGB(rgbString) {
+    const result = rgbString.match(/\d+/g);
+    return { r: parseInt(result[0]), g: parseInt(result[1]), b: parseInt(result[2]) };
+  }
+
+  // --- MODY LED ---
+  let effectInterval;
+
+  function stopEffects() {
+    clearInterval(effectInterval);
+  }
 
   function sendUniformColor(r, g, b) {
     if (!writeCharacteristic) return;
-    const { r: rr, g: gg, b: bb } = applyBrightness(r, g, b);
     const data = new Uint8Array(192);
-    for (let i = 0; i < 64; i++) {
-      data[i * 3] = rr;
-      data[i * 3 + 1] = gg;
-      data[i * 3 + 2] = bb;
+    for (let i = 0; i < 81; i++) {
+      data[i * 3] = r;
+      data[i * 3 + 1] = g;
+      data[i * 3 + 2] = b;
     }
     writeCharacteristic.writeValue(data).catch(console.error);
   }
@@ -132,8 +217,7 @@
     let on = false;
     effectInterval = setInterval(() => {
       on = !on;
-      const { r, g, b } = applyBrightness(on ? 255 : 0, 0, on ? 255 : 0);
-      sendUniformColor(r, g, b);
+      sendUniformColor(on ? 255 : 0, 0, on ? 255 : 0);
     }, 500);
   }
 
@@ -142,8 +226,7 @@
     let i = 0;
     effectInterval = setInterval(() => {
       let val = Math.floor(128 + 127 * Math.sin(i * 0.1));
-      const { r, g, b } = applyBrightness(val, 0, val);
-      sendUniformColor(r, g, b);
+      sendUniformColor(val, 0, val);
       i++;
     }, 50);
   }
@@ -152,14 +235,10 @@
     stopEffects();
     effectInterval = setInterval(() => {
       const data = new Uint8Array(192);
-      for (let i = 0; i < 64; i++) {
-        let r = Math.random() * 255;
-        let g = Math.random() * 255;
-        let b = Math.random() * 255;
-        const adj = applyBrightness(r, g, b);
-        data[i * 3] = adj.r;
-        data[i * 3 + 1] = adj.g;
-        data[i * 3 + 2] = adj.b;
+      for (let i = 0; i < 81; i++) {
+        data[i * 3] = Math.random() * 255;
+        data[i * 3 + 1] = Math.random() * 255;
+        data[i * 3 + 2] = Math.random() * 255;
       }
       writeCharacteristic?.writeValue(data).catch(console.error);
     }, 200);
@@ -170,42 +249,101 @@
     let hue = 0;
     effectInterval = setInterval(() => {
       const data = new Uint8Array(192);
-      for (let i = 0; i < 64; i++) {
+      for (let i = 0; i < 81; i++) {
         const h = (hue + i * 5) % 360;
         const { r, g, b } = hslToRgb(h / 360, 1, 0.5);
-        const adj = applyBrightness(r, g, b);
-        data[i * 3] = adj.r;
-        data[i * 3 + 1] = adj.g;
-        data[i * 3 + 2] = adj.b;
+        data[i * 3] = r;
+        data[i * 3 + 1] = g;
+        data[i * 3 + 2] = b;
       }
       writeCharacteristic?.writeValue(data).catch(console.error);
       hue = (hue + 5) % 360;
     }, 150);
   }
 
+  function hslToRgb(h, s, l) {
+    let r, g, b;
+    if (s === 0) r = g = b = l;
+    else {
+      const hue2rgb = (p, q, t) => {
+        if(t < 0) t += 1;
+        if(t > 1) t -= 1;
+        if(t < 1/6) return p + (q - p) * 6 * t;
+        if(t < 1/2) return q;
+        if(t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+        return p;
+      };
+      const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+      const p = 2 * l - q;
+      r = hue2rgb(p, q, h + 1/3);
+      g = hue2rgb(p, q, h);
+      b = hue2rgb(p, q, h - 1/3);
+    }
+    return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
+  }
+
   function startHeart() {
     stopEffects();
     const pattern = [
-      0,255,0,0,0,0,255,0,
-      255,255,0,0,0,0,255,255,
-      255,255,255,0,0,255,255,255,
-      255,255,255,255,255,255,255,255,
-      255,255,255,255,255,255,255,255,
-      0,255,255,255,255,255,255,0,
-      0,0,255,255,255,255,0,0,
-      0,0,0,255,255,0,0,0
+      0,255,0,0,0,0,0,255,0,
+      255,255,0,0,0,0,0,255,255,
+      255,255,255,0,0,0,255,255,255,
+      255,255,255,255,0,255,255,255,255,
+      255,255,255,255,255,255,255,255,0,
+      0,255,255,255,255,255,255,0,0,
+      0,0,255,255,255,255,0,0,0,
+      0,0,0,255,255,0,0,0,0
     ];
     effectInterval = setInterval(() => {
       const data = new Uint8Array(192);
-      for(let i=0; i<64; i++) {
+      for(let i=0; i<81; i++) {
         const val = pattern[i];
-        const { r, g, b } = applyBrightness(val, 0, val);
-        data[i*3] = r;
-        data[i*3+1] = g;
-        data[i*3+2] = b;
+        data[i*3] = val;
+        data[i*3+1] = 0;
+        data[i*3+2] = val;
       }
       writeCharacteristic?.writeValue(data).catch(console.error);
     }, 500);
+
+// --- STEROWANIE GŁOSEM ---
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognition;
+
+  if (SpeechRecognition) {
+    const voiceBtn = document.createElement("button");
+    voiceBtn.textContent = "Sterowanie głosem ";
+   voiceBtn.style.marginTop = "15px";
+    connectionPage.appendChild(voiceBtn);
+
+    recognition = new SpeechRecognition();
+    recognition.lang = "pl-PL";
+    recognition.continuous = false;
+
+    voiceBtn.addEventListener("click", () => {
+      recognition.start();
+      document.getElementById('connStatus').textContent = "Nasłuchiwanie...";
+    });
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript.toLowerCase();
+      document.getElementById('connStatus').textContent = "Powiedziano: " + transcript;
+
+      if (transcript.includes("czerwony")) sendUniformColor(255, 0, 0);
+      else if (transcript.includes("zielony")) sendUniformColor(0, 255, 0);
+      else if (transcript.includes("niebieski")) sendUniformColor(0, 0, 255);
+      else if (transcript.includes("żółty")) sendUniformColor(255, 255, 0);
+      else if (transcript.includes("fioletowy") || transcript.includes("purpurowy")) sendUniformColor(128, 0, 128);
+      else if (transcript.includes("pomarańczowy")) sendUniformColor(255, 165, 0);
+      else if (transcript.includes("tęcza")) startRainbow();
+      else if (transcript.includes("stop")) stopEffects();
+    };
+
+    recognition.onerror = (event) => {
+      document.getElementById('connStatus').textContent = "Błąd rozpoznawania: " + event.error;
+    };
+  } else {
+    console.warn("Web Speech API nie jest wspierane w tej przeglądarce.");
+  }
   }
 </script>
 </body>
