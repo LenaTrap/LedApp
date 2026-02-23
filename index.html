@@ -47,6 +47,7 @@
   <button id="btnGrid">Siatka LED</button>
   <button id="btnMusic">Mod muzyczny</button>
   <button id="btnMods">Mody</button>
+  <button id="btnTest">Test</button>
 </nav>
 <main>
   <section id="connectionPage">
@@ -112,6 +113,10 @@
   btnGrid.addEventListener('click', () => { showPage(gridPage); setActiveButton(btnGrid); });
   btnMusic.addEventListener('click', () => { showPage(musicPage); setActiveButton(btnMusic); });
   btnMods.addEventListener('click', () => { showPage(modsPage); setActiveButton(btnMods); });
+  btnTest.addEventListener('click', () => {
+    window.location.href = 'test.html';
+  });
+
 
   showPage(connectionPage);
 
